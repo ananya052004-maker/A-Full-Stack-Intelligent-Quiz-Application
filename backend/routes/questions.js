@@ -6,8 +6,8 @@ const router = express.Router();
 router.get('/questions', (req, res) => {
   const { category } = req.query;
   const sql = category
-    ? 'SELECT * FROM questions WHERE category = ? LIMIT 10'
-    : 'SELECT * FROM questions LIMIT 10';
+    ? 'SELECT id, question, options, correctanswer AS "correctAnswer", category FROM questions WHERE category = ? LIMIT 10'
+    : 'SELECT id, question, options, correctanswer AS "correctAnswer", category FROM questions LIMIT 10';
 
   const params = category ? [category] : [];
 
@@ -50,7 +50,7 @@ router.get('/leaderboard', (req, res) => {
     SELECT u.name, s.category, MAX(s.score) AS top_score
     FROM scores s
     JOIN users u ON s.user_id = u.id
-    GROUP BY s.user_id, s.category
+    GROUP BY s.user_id, u.name, s.category
     ORDER BY top_score DESC
     LIMIT 10
   `;

@@ -7,6 +7,13 @@ require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
 const questionRoutes = require('./routes/questions');
+const pollRoutes = require('./routes/polls');
+const qnaRoutes = require('./routes/qna');
+const surveyRoutes = require('./routes/surveys');
+const wordcloudRoutes = require('./routes/wordclouds');
+const presentationRoutes = require('./routes/presentations');
+const teacherRoutes = require('./routes/teacher');
+const quizTakingRoutes = require('./routes/quizTaking');
 
 const app = express();
 app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
@@ -38,6 +45,13 @@ app.get('/api/auth/user', (req, res) => {
 console.log("Mounting auth routes...");
 app.use('/api/auth', authRoutes);
 app.use('/api', questionRoutes);
+app.use('/api', pollRoutes);
+app.use('/api', qnaRoutes);
+app.use('/api', surveyRoutes);
+app.use('/api', wordcloudRoutes);
+app.use('/api', presentationRoutes);
+app.use('/api/teacher', teacherRoutes);
+app.use('/api', quizTakingRoutes);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

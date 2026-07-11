@@ -1,8 +1,23 @@
 // backend/routes/auth.js
 const express = require('express');
 const passport = require('passport');
+const db = require('../db');
 
 const router = express.Router();
+
+// Set the logged-in user's role (teacher/student), chosen after first login.
+router.post('/role', (req, res) => {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not logged in' });
+  const { role } = req.body;
+  if (!['teacher', 'student'].includes(role)) {
+    return res.status(400).json({ error: "role must be 'teacher' or 'student'" });
+  }
+  db.query('UPDATE users SET role = ? WHERE id = ?', [role, req.user.id], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    req.user.role = role; // keep the session copy in sync
+    res.json({ id: req.user.id, name: req.user.name, email: req.user.email, role });
+  });
+});
 
 router.get('/test', (req, res) => {
   res.send('Auth route working');
