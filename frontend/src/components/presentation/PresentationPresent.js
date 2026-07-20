@@ -4,7 +4,7 @@ import axios from 'axios';
 import { getVoterToken } from '../../utils/token';
 import SlideRenderer from './SlideRenderer';
 
-const API = 'http://localhost:5000/api';
+const API = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 function PresentationPresent() {
   const { id } = useParams();

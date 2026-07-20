@@ -5,6 +5,9 @@ const db = require('../db');
 
 const router = express.Router();
 
+// Where to send the user after login/logout (the deployed frontend in prod).
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
 // Set the logged-in user's role (teacher/student), chosen after first login.
 router.post('/role', (req, res) => {
   if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not logged in' });
@@ -29,15 +32,15 @@ router.get('/google',
 
 router.get('/google/callback',
   passport.authenticate('google', {
-    successRedirect: 'http://localhost:3000',
-    failureRedirect: 'http://localhost:3000/login'
+    successRedirect: FRONTEND_URL,
+    failureRedirect: `${FRONTEND_URL}/login`
   })
 );
 
 router.get('/logout', (req, res, next) => {
   req.logout(function (err) {
     if (err) return next(err);
-    res.redirect('http://localhost:3000');
+    res.redirect(FRONTEND_URL);
   });
 });
 

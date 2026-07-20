@@ -16,7 +16,14 @@ const teacherRoutes = require('./routes/teacher');
 const quizTakingRoutes = require('./routes/quizTaking');
 
 const app = express();
-app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
+
+const isProd = process.env.NODE_ENV === 'production';
+// Allow the deployed frontend origin (set FRONTEND_URL in production).
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+// Behind a hosting proxy (Render, Railway…), needed for secure cookies.
+app.set('trust proxy', 1);
+app.use(cors({ origin: FRONTEND_URL, credentials: true }));
 app.use(express.json());
 app.get('/', (req, res) => {
   res.send('Quiz App Backend is running 🚀');
@@ -26,7 +33,14 @@ app.get('/', (req, res) => {
 app.use(session({
   secret: process.env.SESSION_SECRET || 'keyboard cat',
   resave: false,
-  saveUninitialized: false
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    // Cross-site cookies (frontend and backend on different domains) require
+    // SameSite=None + Secure in production; Lax works for local dev.
+    sameSite: isProd ? 'none' : 'lax',
+    secure: isProd,
+  },
 }));
 app.use(passport.initialize());
 app.use(passport.session());

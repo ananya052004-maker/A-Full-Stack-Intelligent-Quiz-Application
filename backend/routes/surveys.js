@@ -2,7 +2,6 @@ const express = require('express');
 const db = require('../db');
 const router = express.Router();
 
-// Create a survey (rating scale or open text)
 router.post('/surveys', (req, res) => {
   const { question, mode } = req.body;
   const scale = Number(req.body.scale) || 5;
@@ -11,15 +10,14 @@ router.post('/surveys', (req, res) => {
   if (!['rating', 'text'].includes(mode)) {
     return res.status(400).json({ error: "mode must be 'rating' or 'text'" });
   }
-
+  
   const sql = 'INSERT INTO surveys (question, mode, scale) VALUES (?, ?, ?)';
   db.query(sql, [question.trim(), mode, scale], (err, result) => {
     if (err) return res.status(500).json({ error: err.message });
     res.status(201).json({ id: result.insertId });
   });
+  
 });
-
-// Get a survey + aggregated results
 router.get('/surveys/:id', (req, res) => {
   const { id } = req.params;
   const responderToken = req.query.responderToken || '';

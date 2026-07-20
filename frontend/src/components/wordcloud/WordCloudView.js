@@ -1,9 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, lazy, Suspense } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
 import { getVoterToken } from '../../utils/token';
 
-const API = 'http://localhost:5000/api';
+// three.js is heavy — load the WebGL view only when it's actually shown,
+// so it never bloats the main bundle for the rest of the app.
+const WordCloud3D = lazy(() => import('./WordCloud3D'));
+
+const API = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 const COLORS = [
   'text-quorum-600',
   'text-emerald-600',
@@ -24,6 +28,7 @@ function WordCloudView({ embedId, embedded = false }) {
   const [error, setError] = useState('');
   const [input, setInput] = useState('');
   const [copied, setCopied] = useState(false);
+  const [view, setView] = useState('3d'); // '3d' (WebGL) or '2d'
 
   const fetchCloud = useCallback(async () => {
     try {
@@ -99,28 +104,63 @@ function WordCloudView({ embedId, embedded = false }) {
 
   const cloudBody = (
     <>
-      {/* The live cloud */}
-      <div className="flex min-h-[180px] flex-wrap items-center justify-center gap-x-4 gap-y-1 rounded-xl bg-slate-50 p-6">
-        {cloud.words.length === 0 ? (
-          <p className="text-slate-400">Waiting for the first words…</p>
-        ) : (
-          cloud.words.map((w, i) => {
-            const size = 16 + (w.value / maxValue) * 40; // 16px … 56px
-            return (
-              <span
-                key={w.text}
-                className={`font-extrabold leading-tight transition-all duration-500 ${
-                  COLORS[i % COLORS.length]
-                }`}
-                style={{ fontSize: `${size}px` }}
-                title={`${w.value} ${w.value === 1 ? 'mention' : 'mentions'}`}
-              >
-                {w.text}
-              </span>
-            );
-          })
-        )}
+      {/* 2D / 3D view toggle */}
+      <div className="mb-3 flex justify-end gap-1">
+        {[
+          { key: '3d', label: '✨ 3D' },
+          { key: '2d', label: '2D' },
+        ].map((v) => (
+          <button
+            key={v.key}
+            onClick={() => setView(v.key)}
+            className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+              view === v.key
+                ? 'bg-quorum-500 text-white'
+                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            }`}
+          >
+            {v.label}
+          </button>
+        ))}
       </div>
+
+      {/* The live cloud — WebGL (three.js) or flat */}
+      {view === '3d' ? (
+        <Suspense
+          fallback={
+            <div
+              className="flex items-center justify-center rounded-xl bg-slateink text-slate-400"
+              style={{ height: embedded ? 300 : 380 }}
+            >
+              Loading 3D view…
+            </div>
+          }
+        >
+          <WordCloud3D words={cloud.words} height={embedded ? 300 : 380} />
+        </Suspense>
+      ) : (
+        <div className="flex min-h-[180px] flex-wrap items-center justify-center gap-x-4 gap-y-1 rounded-xl bg-slate-50 p-6">
+          {cloud.words.length === 0 ? (
+            <p className="text-slate-400">Waiting for the first words…</p>
+          ) : (
+            cloud.words.map((w, i) => {
+              const size = 16 + (w.value / maxValue) * 40; // 16px … 56px
+              return (
+                <span
+                  key={w.text}
+                  className={`font-extrabold leading-tight transition-all duration-500 ${
+                    COLORS[i % COLORS.length]
+                  }`}
+                  style={{ fontSize: `${size}px` }}
+                  title={`${w.value} ${w.value === 1 ? 'mention' : 'mentions'}`}
+                >
+                  {w.text}
+                </span>
+              );
+            })
+          )}
+        </div>
+      )}
 
       {/* Submission input */}
       {remaining > 0 ? (

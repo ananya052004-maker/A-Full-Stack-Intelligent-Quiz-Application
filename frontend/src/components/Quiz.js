@@ -14,7 +14,7 @@ function Quiz() {
 
   useEffect(() => {
     axios
-      .get(`http://localhost:5000/api/questions?category=${category}`)
+      .get(`${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/questions?category=${category}`)
       .then(response => {
         setQuestions(response.data);
         setLoading(false);
