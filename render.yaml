@@ -1,0 +1,33 @@
+# Render Blueprint — deploys the Quorum backend + a PostgreSQL database together.
+# In Render: New → Blueprint → connect this repo. It reads this file.
+services:
+  - type: web
+    name: quorum-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PGSSL
+        value: "true"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: quorum-db
+          property: connectionString
+      # Set this to your Vercel URL after the frontend is deployed:
+      - key: FRONTEND_URL
+        value: https://quiz-app-frontend-pearl.vercel.app
+      # Optional — only needed for Google login. Add in the Render dashboard:
+      #   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_CALLBACK_URL
+
+databases:
+  - name: quorum-db
+    plan: free

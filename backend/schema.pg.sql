@@ -149,6 +149,7 @@ CREATE TABLE quiz_attempts (
   name       VARCHAR(80) NOT NULL,
   score      INT NOT NULL,
   total      INT NOT NULL,
+  time_taken INT NOT NULL DEFAULT 0,  -- seconds; tie-breaker (lower = better)
   created_at TIMESTAMP DEFAULT NOW()
 );
 CREATE INDEX idx_qa_quiz ON quiz_attempts(quiz_id);

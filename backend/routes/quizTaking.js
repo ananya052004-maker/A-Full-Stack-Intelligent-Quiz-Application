@@ -20,17 +20,21 @@ router.get('/quizzes', (req, res) => {
   });
 });
 
-// Public: leaderboard for a quiz — best score per name, ranked.
-router.get('/quizzes/:id/leaderboard', (req, res) => {
-  const sql = `
-    SELECT name, MAX(score) AS score, MAX(total) AS total, MIN(created_at) AS achieved_at
+// Each student's BEST attempt, ranked: highest score first, and on a tie,
+// the faster time wins. DISTINCT ON picks each name's best (score, time) row.
+const LEADERBOARD_SQL = `
+  SELECT name, score, total, time_taken FROM (
+    SELECT DISTINCT ON (name) name, score, total, time_taken
     FROM quiz_attempts
     WHERE quiz_id = ?
-    GROUP BY name
-    ORDER BY score DESC, achieved_at ASC
-    LIMIT 20
-  `;
-  db.query(sql, [req.params.id], (err, rows) => {
+    ORDER BY name, score DESC, time_taken ASC
+  ) best
+  ORDER BY best.score DESC, best.time_taken ASC
+`;
+
+// Public: leaderboard for a quiz (score, then time as tie-breaker).
+router.get('/quizzes/:id/leaderboard', (req, res) => {
+  db.query(`${LEADERBOARD_SQL} LIMIT 20`, [req.params.id], (err, rows) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
@@ -103,38 +107,29 @@ router.post('/quizzes/:id/submit', (req, res) => {
       };
     });
     const total = questions.length;
+    // Time taken in seconds (client-measured); clamp to a sane range.
+    const timeTaken = Math.max(0, Math.min(parseInt(req.body.timeTaken, 10) || 0, 86400));
 
-    // Record the attempt for the leaderboard, then compute this taker's rank.
+    // Record the attempt, then compute rank from the SAME ordering the
+    // leaderboard uses (score DESC, then time ASC) so they always agree.
     db.query(
-      'INSERT INTO quiz_attempts (quiz_id, name, score, total) VALUES (?, ?, ?, ?)',
-      [id, takerName, score, total],
+      'INSERT INTO quiz_attempts (quiz_id, name, score, total, time_taken) VALUES (?, ?, ?, ?, ?)',
+      [id, takerName, score, total, timeTaken],
       (insErr) => {
         if (insErr) return res.status(500).json({ error: insErr.message });
 
-        // Rank = 1 + number of DISTINCT names with a strictly higher best score.
-        const rankSql = `
-          SELECT COUNT(*) AS ahead FROM (
-            SELECT name, MAX(score) AS best FROM quiz_attempts WHERE quiz_id = ? GROUP BY name
-          ) t WHERE t.best > ?
-        `;
-        db.query(rankSql, [id, score], (rankErr, rankRows) => {
-          if (rankErr) return res.status(500).json({ error: rankErr.message });
-          const rank = (rankRows[0].ahead || 0) + 1;
-          db.query(
-            'SELECT COUNT(DISTINCT name) AS players FROM quiz_attempts WHERE quiz_id = ?',
-            [id],
-            (cErr, cRows) => {
-              if (cErr) return res.status(500).json({ error: cErr.message });
-              res.json({
-                total,
-                score,
-                results,
-                name: takerName,
-                rank,
-                players: cRows[0].players,
-              });
-            }
-          );
+        db.query(LEADERBOARD_SQL, [id], (lbErr, board) => {
+          if (lbErr) return res.status(500).json({ error: lbErr.message });
+          const pos = board.findIndex((r) => r.name === takerName);
+          res.json({
+            total,
+            score,
+            timeTaken,
+            results,
+            name: takerName,
+            rank: pos >= 0 ? pos + 1 : board.length,
+            players: board.length,
+          });
         });
       }
     );

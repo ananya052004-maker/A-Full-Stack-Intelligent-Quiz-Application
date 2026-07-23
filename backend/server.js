@@ -14,6 +14,7 @@ const wordcloudRoutes = require('./routes/wordclouds');
 const presentationRoutes = require('./routes/presentations');
 const teacherRoutes = require('./routes/teacher');
 const quizTakingRoutes = require('./routes/quizTaking');
+const initDb = require('./initDb');
 
 const app = express();
 
@@ -68,6 +69,9 @@ app.use('/api/teacher', teacherRoutes);
 app.use('/api', quizTakingRoutes);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`✅ Server started on http://localhost:${PORT}`);
+// Initialize the DB on first boot (no-op if already set up), then start.
+initDb().finally(() => {
+  app.listen(PORT, () => {
+    console.log(`✅ Server started on http://localhost:${PORT}`);
+  });
 });

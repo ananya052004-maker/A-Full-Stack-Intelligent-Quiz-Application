@@ -2,13 +2,13 @@
 
 A complete reference for talking about this project in an SDE interview. It covers what the project is, how every piece works, the key engineering decisions and trade-offs, and a bank of likely questions with model answers.
 
-> **One-line pitch:** *Quorum is a full-stack, Mentimeter-style interactive classroom platform — a React + Node/Express + PostgreSQL app where a teacher builds quizzes from a managed question bank and runs live audience-participation activities (polls, word clouds, surveys, Q&A, and host-controlled presentations), with role-based access and a per-quiz leaderboard.*
+> **One-line pitch:** *Quorum is a full-stack, Mentimeter-style interactive classroom platform — a React + Node/Express + PostgreSQL app where a teacher builds quizzes from a managed question bank and runs live audience-participation activities (polls, word clouds, surveys, Q&A, and host-controlled presentations), with role-based access, a per-quiz leaderboard, a 3D WebGL word-cloud visualization, and a full cloud deployment.*
 
 ---
 
 ## 1. The 60-second elevator pitch
 
-"I took a basic solo quiz app and turned it into a live, multi-user engagement platform called **Quorum**. It has two sides: a **teacher side** where you manage a question bank and assemble quizzes, and an **audience side** where students or guests join by link to take quizzes or participate in live activities — polls, word clouds, surveys, Q&A, and combined presentations. It's built with **React and Tailwind** on the front end, **Node/Express with Passport (Google OAuth)** on the back end, and **PostgreSQL** for storage. The interesting engineering is in the **role-based access control**, the **server-side quiz scoring** so students can't see answers, a **polymorphic 'slide' model** with a strategy-pattern renderer for the presentation feature, and a **database-adapter layer** I wrote when I migrated the whole thing from MySQL to PostgreSQL without rewriting all the route code."
+"I took a basic solo quiz app and turned it into a live, multi-user engagement platform called **Quorum**. It has two sides: a **teacher side** where you manage a question bank and assemble quizzes, and an **audience side** where students or guests join by link to take quizzes or participate in live activities — polls, word clouds, surveys, Q&A, and combined presentations. It's built with **React and Tailwind** on the front end, **Node/Express with Passport (Google OAuth)** on the back end, and **PostgreSQL** for storage. The interesting engineering is in the **role-based access control**, the **server-side quiz scoring** so students can't see answers, a **polymorphic 'slide' model** with a strategy-pattern renderer for the presentation feature, a **database-adapter layer** I wrote when I migrated the whole thing from MySQL to PostgreSQL without rewriting all the route code, and a **3D WebGL word-cloud** built with three.js and lazy-loaded so it doesn't bloat the main bundle. It's **deployed** as three pieces — frontend on Vercel, API on Render, database on Neon."
 
 ---
 
@@ -19,12 +19,14 @@ A complete reference for talking about this project in an SDE interview. It cove
 | Frontend framework | **React 19** (Create React App) | Component model fits the many small interactive views; already the project's base. |
 | Routing | **react-router-dom v7** | Client-side routing for the SPA; nested/param routes for `/take/:id`, `/features/poll/:id`, etc. |
 | Styling | **Tailwind CSS v3** | Utility-first, consistent design system, fast iteration, one shared theme (`tailwind.config.js`). |
+| 3D graphics | **three.js (WebGL)** | Renders the word cloud as a rotating 3D sphere of word sprites; lazy-loaded via `React.lazy` so it's a separate chunk. |
 | State sharing | **React Context API** (`AuthContext`) | Global auth/role state without a heavier library like Redux — the app's shared state is small. |
 | HTTP | **axios** | Promises, interceptors-ready, `withCredentials` for session cookies. |
 | Backend runtime | **Node.js + Express 5** | Lightweight REST API; matches the existing stack. |
 | Auth | **Passport + passport-google-oauth20 + express-session** | Delegated identity (Google), session-cookie auth. |
 | Database | **PostgreSQL 16** (migrated from MySQL 8) | Relational data with strong constraints (FKs, UNIQUE), JSONB for flexible fields, and a more standards-compliant SQL engine. |
 | DB driver | **pg** (node-postgres) with connection pooling | Pooled connections, parameterized queries. |
+| Deployment | **Vercel** (frontend) · **Render** (API) · **Neon** (Postgres) | Managed free-tier hosting; each piece deploys independently; config via environment variables. |
 
 **Why a relational DB and not NoSQL?** The data is highly relational — users → quizzes → quiz_questions → questions, and quiz_attempts for the leaderboard. I rely on foreign keys with `ON DELETE CASCADE`, `UNIQUE` constraints for one-vote-per-person, and aggregate queries (`GROUP BY`, `COUNT`, `MAX`) for tallies and leaderboards. That's exactly relational-database territory. JSONB covers the few flexible fields (quiz options, slide config) so I still get schema flexibility where I want it.
 
@@ -107,7 +109,7 @@ A complete reference for talking about this project in an SDE interview. It cove
 All follow the same pattern: **create → share link → participate → live results**.
 
 - **Poll:** fixed options; one vote per browser (enforced by a `localStorage` UUID token **and** a `UNIQUE(poll_id, voter_token)` constraint → duplicate returns **409**). Results as animated percentage bars.
-- **Word Cloud:** open text; backend aggregates word frequency (lowercased), and the frontend scales each word's font size by frequency. Per-person word limit enforced server-side.
+- **Word Cloud:** open text; backend aggregates word frequency (lowercased), and the frontend scales each word by frequency. Two views via a toggle: a flat 2D cloud and a **3D WebGL cloud** (three.js) where words orbit on a rotating sphere, sized by frequency, with drag-to-rotate / scroll-to-zoom. Per-person word limit enforced server-side. (See §6.6.)
 - **Survey:** two modes — **rating** (1–5 → average + histogram) or **open text** (→ live feed). Anonymous; one response per person.
 - **Q&A:** participants submit questions and **upvote** (toggle, one per person); list auto-sorts by votes. The board **owner** can mark questions answered (owner-only, enforced server-side → 403 for others).
 
@@ -178,6 +180,13 @@ The client never receives correct answers for a quiz. `GET /quizzes/:id` omits t
 ### 6.5 Single source of truth for features
 A `features.js` config array drives the navbar, the footer, and the feature landing pages, each with a `ready` flag. Flip one flag to launch/retire a feature — no scattered edits.
 
+### 6.6 WebGL 3D visualization + code-splitting
+The word cloud has an optional **3D view built directly with three.js** (not a wrapper library like react-three-fiber, so I control the full render lifecycle):
+- **How it renders text in WebGL:** WebGL has no native text, so each word is drawn onto its own 2D `<canvas>`, that canvas becomes a `CanvasTexture`, and the texture is mapped onto a `THREE.Sprite` (a billboard that always faces the camera). Sprite scale = word frequency, so common words are bigger — same data, richer presentation.
+- **Layout:** words are distributed evenly over a sphere using a **Fibonacci lattice** (golden-angle spiral) so they don't clump. `OrbitControls` gives drag-to-rotate / scroll-to-zoom, plus a slow auto-rotation via a `requestAnimationFrame` loop.
+- **Lifecycle & memory:** the whole scene lives in a `useEffect`; the cleanup function cancels the animation frame and **disposes** every texture, material, and the renderer — WebGL resources aren't garbage-collected, so failing to dispose leaks GPU memory. I also memoize on a "signature" of the words so the 2-second re-poll only rebuilds the scene when the data actually changed.
+- **Code-splitting (the perf decision):** three.js is ~130 kB gzipped. I load `WordCloud3D` with **`React.lazy` + `Suspense`**, so it's emitted as a **separate chunk** that only downloads when a user opens the 3D view. This kept the main bundle at ~104 kB instead of ballooning to ~242 kB — a concrete lazy-loading/bundle-optimization story.
+
 ---
 
 ## 7. Authentication & authorization
@@ -238,6 +247,7 @@ Interviewers love this section. Be proactive about it.
 
 - **Polling vs WebSockets:** chose polling for simplicity; would move to Socket.io + Redis for true real-time at scale (see §8).
 - **In-memory sessions:** `express-session` uses the default in-memory store — fine for one instance, but I'd move to a Redis/Postgres session store for horizontal scaling and restart-safety.
+- **Cross-domain cookie auth:** login relies on a `SameSite=None` cookie between the Vercel frontend and Render backend, which strict third-party-cookie browsers can block. I'd move to **JWT-in-header** auth (or serve both under one domain via a reverse proxy) to make login robust everywhere. (Public features are unaffected — they don't use cookies.)
 - **The db.js adapter is pragmatic, not permanent:** it minimized migration risk, but a cleaner long-term design is a thin query layer or a query builder (Knex) / ORM (Prisma) with typed models.
 - **No automated tests yet:** I'd add Jest + Supertest for the API (scoring logic, role gating, one-vote enforcement) and React Testing Library for components. The scoring and rank logic are the highest-value units to test.
 - **Role is permanent once chosen:** no self-serve switch or admin panel; I'd add an admin role and role management.
@@ -287,6 +297,18 @@ Use §5. Be ready to explain the leaderboard query (`GROUP BY name, MAX(score)`)
 **Q: What design patterns did you use?**
 Strategy (SlideRenderer), Adapter (db.js), a single-source-of-truth config, and polymorphic modeling. See §6.
 
+**Q: You used WebGL — how do you render text in 3D, since WebGL has no text?**
+Each word is drawn to a 2D canvas, the canvas becomes a texture, and the texture is mapped onto a camera-facing sprite; sprites are placed on a sphere via a Fibonacci lattice and sized by word frequency. See §6.6. Be ready to mention **disposing** GPU resources in cleanup to avoid leaks.
+
+**Q: three.js is large — how did you stop it bloating your app?**
+Lazy-loaded the 3D component with `React.lazy` + `Suspense`, so it's a separate chunk that only downloads when the 3D view is opened. Kept the main bundle ~104 kB instead of ~242 kB. See §6.6.
+
+**Q: How is it deployed, and how do the frontend and backend talk in production?**
+Three independently deployed pieces — frontend on Vercel, Express API on Render, Postgres on Neon. The frontend's API base URL is an env var (`REACT_APP_API_URL`); the backend reads `DATABASE_URL`, `FRONTEND_URL`, and OAuth URLs from env vars. Because the two are on different domains, the login session uses a `SameSite=None; Secure` cookie (with `trust proxy`). See §15.
+
+**Q: What breaks when you split a monolith's frontend and backend across domains?**
+Two things: (1) **CORS** — the API must explicitly allow the frontend origin with credentials; (2) **cookies** — the session cookie must be `SameSite=None; Secure`, and some browsers restrict third-party cookies, so login can be finicky. All the *public* features work regardless since they don't need cookies. The robust fix is JWT-in-header auth or serving both under one domain. See §15.
+
 ### Coding-adjacent
 **Q: How would you test the scoring logic?**
 Unit-test `POST /submit` with Supertest: all-correct, all-wrong, partial, blank answers, and that the response never leaks answers before submit. Test one-vote enforcement returns 409 on a repeat token.
@@ -298,14 +320,37 @@ Two people submitting the same last vote — the `UNIQUE` constraint makes the D
 
 ## 13. Numbers & facts to have ready
 - **~17 tables**, **9 topics**, **80 seed questions**, **6 activity/feature types** (Quiz, Poll, Word Cloud, Survey, Q&A, Presentations) + role-based access.
-- Frontend: React 19, react-router v7, Tailwind v3, Context API.
+- Frontend: React 19, react-router v7, Tailwind v3, Context API, **three.js (WebGL)**.
 - Backend: Express 5, Passport (Google OAuth), express-session, `pg`.
 - DB: PostgreSQL 16 (migrated from MySQL 8), JSONB, FKs with cascade, UNIQUE constraints.
 - Live updates: 2s polling (upgrade path: Socket.io + Redis).
+- **Bundle:** main ~104 kB gzipped; three.js split into a ~138 kB lazy chunk.
+- **Deployment:** 3 services — Vercel (frontend) + Render (API) + Neon (Postgres), all env-var configured.
 
 ---
 
 ## 14. 30-second architecture whiteboard script
-"React SPA talks to an Express REST API over HTTP with session-cookie auth. Express has role-gated routes and a `db.js` layer that speaks to PostgreSQL through a connection pool. Data is fully relational — users own quizzes, quizzes reference questions through a join table, and attempts feed the leaderboard. Live features poll the API every couple seconds today; the scale-up is WebSockets with Redis-backed shared state. The clever bits are a polymorphic slide model with a strategy-pattern renderer, and a database adapter that let me migrate MySQL→Postgres with minimal churn."
+"React SPA talks to an Express REST API over HTTP with session-cookie auth. Express has role-gated routes and a `db.js` layer that speaks to PostgreSQL through a connection pool. Data is fully relational — users own quizzes, quizzes reference questions through a join table, and attempts feed the leaderboard. Live features poll the API every couple seconds today; the scale-up is WebSockets with Redis-backed shared state. The clever bits are a polymorphic slide model with a strategy-pattern renderer, a database adapter that let me migrate MySQL→Postgres with minimal churn, and a lazy-loaded three.js WebGL word cloud. In production it's three services — Vercel, Render, Neon."
+
+---
+
+## 15. Deployment architecture (Vercel + Render + Neon)
+
+The app deploys as **three independent pieces**, wired together with environment variables:
+
+```
+  Vercel (React static)  ──HTTPS──▶  Render (Express API)  ──▶  Neon (PostgreSQL)
+   REACT_APP_API_URL                  DATABASE_URL, FRONTEND_URL, OAuth vars
+```
+
+- **Frontend → Vercel.** Static build of the React app. The API base URL is `process.env.REACT_APP_API_URL` (falls back to `localhost:5000` in dev), so the same code runs locally and in prod. A `vercel.json` sets `CI=false` (so ESLint warnings don't fail the build) and SPA rewrites (all routes → `index.html`, needed for client-side routing).
+- **Backend → Render.** `npm start` runs the Express server; `PORT` is provided by Render. CORS is locked to `FRONTEND_URL`; the Google OAuth callback and login/logout redirects are env-driven.
+- **Database → Neon.** Managed Postgres. `db.js` uses `DATABASE_URL` when present (with SSL), so no code change vs. local. Schema + seed loaded from `schema.pg.sql` and `seed_questions.pg.sql`.
+
+**The interesting deployment problem — cross-domain auth.** Frontend (`*.vercel.app`) and backend (`*.onrender.com`) are different domains, so the login session cookie must be `SameSite=None; Secure`, and the server needs `app.set('trust proxy', 1)` to set a secure cookie behind Render's TLS-terminating proxy. Public features (polls, quizzes, word clouds, etc.) don't rely on cookies, so they work regardless; only teacher login depends on this. A fully robust alternative is JWT-in-header auth or serving both under one domain via a reverse proxy — a good "what I'd do next" answer.
+
+**Config-as-environment.** No secrets or URLs are hardcoded — everything (`DATABASE_URL`, `FRONTEND_URL`, `GOOGLE_*`, `REACT_APP_API_URL`) is an env var. This is the **twelve-factor "config in the environment"** principle and is what makes the same code run in dev and prod. Full runbook in [`DEPLOYMENT.md`](DEPLOYMENT.md).
+
+---
 
 Good luck — you built all of this, so speak about it with ownership. 🚀

@@ -1,9 +1,17 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 
 const API = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
+// Format seconds as m:ss (e.g. 83 → "1:23").
+function formatTime(sec) {
+  if (sec === null || sec === undefined) return '—';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
 function LeaderboardTable({ id, highlightName }) {
   const [rows, setRows] = useState(null);
@@ -23,31 +31,59 @@ function LeaderboardTable({ id, highlightName }) {
   if (rows.length === 0)
     return <p className="py-6 text-center text-slate-400">No one has taken this quiz yet.</p>;
 
+  const champion = rows[0];
   const medal = ['🥇', '🥈', '🥉'];
   return (
-    <div className="space-y-2">
-      {rows.map((r, i) => {
-        const mine = highlightName && r.name === highlightName;
-        return (
-          <div
-            key={`${r.name}-${i}`}
-            className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
-              mine ? 'border-quorum-400 bg-quorum-50' : 'border-slate-200 bg-white'
-            }`}
-          >
-            <span className="w-8 text-center text-lg font-bold text-slate-500">
-              {medal[i] || i + 1}
-            </span>
-            <span className="flex-1 font-semibold text-slateink">
-              {r.name} {mine && <span className="text-xs text-quorum-600">(you)</span>}
-            </span>
-            <span className="font-bold text-slateink">
-              {r.score}
-              <span className="text-sm font-normal text-slate-400">/{r.total}</span>
-            </span>
-          </div>
-        );
-      })}
+    <div>
+      {/* Champion banner — the winner (rank #1) */}
+      <div className="mb-4 flex items-center gap-4 rounded-2xl border border-amber-300 bg-gradient-to-r from-amber-50 to-yellow-50 p-4 shadow-card">
+        <span className="text-4xl">🏆</span>
+        <div className="flex-1">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-amber-600">Top rank</p>
+          <p className="text-lg font-extrabold text-slateink">
+            {champion.name}
+            {highlightName && champion.name === highlightName && (
+              <span className="ml-1 text-sm font-semibold text-amber-600">(you)</span>
+            )}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-xl font-extrabold text-slateink">
+            {champion.score}
+            <span className="text-sm font-normal text-slate-400">/{champion.total}</span>
+          </p>
+          <p className="text-xs text-slate-500">⏱ {formatTime(champion.time_taken)}</p>
+        </div>
+      </div>
+
+      {/* Full ranking */}
+      <div className="space-y-2">
+        {rows.map((r, i) => {
+          const mine = highlightName && r.name === highlightName;
+          return (
+            <div
+              key={`${r.name}-${i}`}
+              className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
+                mine ? 'border-quorum-400 bg-quorum-50' : 'border-slate-200 bg-white'
+              }`}
+            >
+              <span className="w-8 text-center text-lg font-bold text-slate-500">
+                {medal[i] || i + 1}
+              </span>
+              <span className="flex-1 font-semibold text-slateink">
+                {r.name} {mine && <span className="text-xs text-quorum-600">(you)</span>}
+              </span>
+              <span className="w-16 text-right text-xs text-slate-400">
+                ⏱ {formatTime(r.time_taken)}
+              </span>
+              <span className="w-14 text-right font-bold text-slateink">
+                {r.score}
+                <span className="text-sm font-normal text-slate-400">/{r.total}</span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -69,6 +105,9 @@ function TakeQuiz() {
   const [started, setStarted] = useState(false);
   const showLeaderboardOnly = searchParams.get('tab') === 'leaderboard';
 
+  // Timestamp when the quiz actually begins — used to measure time taken.
+  const startRef = useRef(null);
+
   useEffect(() => {
     axios
       .get(`${API}/quizzes/${id}`)
@@ -81,13 +120,24 @@ function TakeQuiz() {
     if (user?.name) setName(user.name);
   }, [user]);
 
+  // Start the timer once the taker is on the questions screen (not the
+  // leaderboard-only view, not the results screen).
+  useEffect(() => {
+    if (quiz && (started || name) && !result && !showLeaderboardOnly && startRef.current === null) {
+      startRef.current = Date.now();
+    }
+  }, [quiz, started, name, result, showLeaderboardOnly]);
+
   const choose = (qid, option) => setAnswers((a) => ({ ...a, [qid]: option }));
 
   const submit = async () => {
     setSubmitting(true);
     setError('');
     try {
-      const res = await axios.post(`${API}/quizzes/${id}/submit`, { answers, name });
+      const timeTaken = startRef.current
+        ? Math.round((Date.now() - startRef.current) / 1000)
+        : 0;
+      const res = await axios.post(`${API}/quizzes/${id}/submit`, { answers, name, timeTaken });
       setResult(res.data);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
@@ -139,10 +189,15 @@ function TakeQuiz() {
           <h1 className="mt-3 text-3xl font-extrabold tracking-tight text-slateink">
             {result.score} / {result.total}
           </h1>
-          <p className="mt-1 text-slate-500">You scored {pct}%</p>
+          <p className="mt-1 text-slate-500">
+            You scored {pct}% · ⏱ {formatTime(result.timeTaken)}
+          </p>
           <div className="mt-4 inline-block rounded-full bg-quorum-50 px-4 py-1.5 text-sm font-semibold text-quorum-700">
             Rank #{result.rank} of {result.players} {result.players === 1 ? 'player' : 'players'}
           </div>
+          {result.rank === 1 && (
+            <p className="mt-3 text-sm font-bold text-amber-600">🏆 You're #1 on the leaderboard!</p>
+          )}
         </div>
 
         {/* Leaderboard */}
